@@ -23,10 +23,11 @@ public final class FixtureMain {
             System.out.println("""
                     HeldItemUidFixture
                     java -jar HeldItemUidFixture.jar --player TestPlayer
-                      [--host 127.0.0.1] [--port 25575] [--slot 0] [--dest-slot 1]
+                      [--host 127.0.0.1] [--port 25575] [--slot 1] [--dest-slot 2]
 
                     Connects to an existing staging RCON endpoint on localhost or an SSH tunnel.
-                    Duplicates the item in the first inventory slot into the second inventory slot so both are filled.
+                    Clones the item in the source hotbar slot into the destination hotbar slot
+                    so both slots are filled (defaults clone hotbar 1 → 2).
                     """);
             return;
         }
@@ -51,7 +52,7 @@ public final class FixtureMain {
         }
         FixtureRunner.Settings settings = FixtureRunner.Settings.parse(
                 options.getOrDefault("--host", "127.0.0.1"), options.getOrDefault("--port", "25575"),
-                options.get("--player"), options.getOrDefault("--slot", "0"), options.getOrDefault("--dest-slot", "1"));
+                options.get("--player"), options.getOrDefault("--slot", "1"), options.getOrDefault("--dest-slot", "2"));
         Console console = System.console();
         if (console == null) {
             throw new IllegalArgumentException("Open the JAR dialog or run from an interactive terminal.");
