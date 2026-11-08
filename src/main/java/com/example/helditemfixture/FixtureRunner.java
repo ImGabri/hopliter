@@ -10,12 +10,9 @@ import java.util.regex.Pattern;
 final class FixtureRunner {
     static final int MAIN_SLOTS = 27;
     private static final String QUERY_PREFIX = " has the following entity data: ";
-    private static final String CLONE_COMMAND_WITH_COMPONENTS =
+    private static final String CLONE_COMMAND =
             "execute as %s if items entity @s inventory.%d * unless items entity @s inventory.%d * "
             + "run item replace entity @s inventory.%d with %s{components:%s} 1";
-    private static final String CLONE_COMMAND_PLAIN =
-            "execute as %s if items entity @s inventory.%d * unless items entity @s inventory.%d * "
-            + "run item replace entity @s inventory.%d with %s 1";
     private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
 
     record Settings(InetAddress host, int port, String player, int sourceSlot, int destSlot) {
@@ -92,16 +89,11 @@ final class FixtureRunner {
             if (dest != null) {
                 return new Result(Status.ERROR, "The destination slot inventory." + settings.destSlot + " is occupied.");
             }
-            String command;
-            if (source.components().isEmpty()) {
-                command = CLONE_COMMAND_PLAIN.formatted(
-                        settings.player(), settings.sourceSlot, settings.destSlot,
-                        settings.destSlot, source.id());
-            } else {
-                command = CLONE_COMMAND_WITH_COMPONENTS.formatted(
-                        settings.player(), settings.sourceSlot, settings.destSlot,
-                        settings.destSlot, source.id(), source.componentsSnb());
-            }
+            String id = source.id();
+            String componentsSnb = source.componentsSnb();
+            String command = CLONE_COMMAND.formatted(
+                    settings.player(), settings.sourceSlot, settings.destSlot,
+                    settings.destSlot, id, componentsSnb);
             String reply = rcon.command(command);
             if (reply != null && reply.startsWith("Replaced")) {
                 return new Result(Status.CLONED,
@@ -170,6 +162,14 @@ final class FixtureRunner {
     }
 
     private record Item(int count, String id, Map<String, Snbt.Tag> components) {
+        public String id() {
+            return id;
+        }
+
+        public Map<String, Snbt.Tag> components() {
+            return components;
+        }
+
         String componentsSnb() {
             return Snbt.write(new Snbt.Compound(components));
         }
