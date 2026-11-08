@@ -1,12 +1,29 @@
-# hopliter
+# hopliter — Hoplite.gg item clone fixture
 
-Item clone fixture for Minecraft staging tests.
+Item clone fixture for Minecraft 1.21.11 staging tests on **hoplite.gg**.
 
 This Java 21 executable clones one item from a source inventory slot into a
 destination inventory slot on an authenticated staging RCON backend, so both
 slots end up filled with the same item (same id, components, and UID). By
 default it clones hotbar slot `1` into hotbar slot `2`. It preserves the source
 stack and does not consume or move it.
+
+## Target environment (from hoplite.gg)
+
+The screenshots from hoplite.gg show:
+
+| Detail | Value |
+|---|---|
+| Minecraft version | 1.21.11 (hoplite-modpack.fabric) |
+| Server software | UniverseSpigot (Velocity) |
+| Velocity version | 1.7.2-26.3 |
+| Java version | 21.0.7 |
+| Detected plugins | botapi, cultac-companion, fastasyncworldedit, floodgate, geysermodelengine, hoplitecosmetics, hoplitenucleus, luckperms, minecraft, modelengine, survival-zombies, velocity, voicechat |
+
+This tool targets the **UniverseSpigot backend**, not the Velocity proxy itself.
+Velocity proxies player connections but RCON inventory commands must be sent to
+the backend's RCON port (default `25575`) reachable at `localhost` or through an
+SSH tunnel.
 
 ## What it does
 
@@ -17,11 +34,13 @@ stack and does not consume or move it.
 4. Reports whether both slots are now filled.
 
 The clone carries the source item's full component data, including any UID
-stored under `components`, so the two slots contain matching items.
+stored under `components` (relevant for plugins such as `hoplitecosmetics` and
+`hoplitenucleus` that may tag items with custom data), so the two slots contain
+matching items.
 
 ## Run on staging
 
-1. Use an existing RCON endpoint on your Java 1.21.11 staging backend, reached
+1. Use an existing RCON endpoint on your UniverseSpigot staging backend, reached
    at localhost or through an SSH tunnel. The default local port is 25575.
 2. Log in with the test player and place an item in the source hotbar slot
    (default `1`). Keep the destination slot (default `2`) empty.
@@ -58,7 +77,7 @@ Exit codes: `0` = cloned, `1` = error, `2` = invalid arguments.
 - **Occupied destination** — aborts before writing; never overwrites an existing slot.
 - **Offline player** — `/data get` reports the player missing; the tool aborts with no write sent.
 - **Bad authentication** — the RCON password is verified before any inventory command is sent.
-- **Truncated item data** — if `/data get` folds the source item's SNBT (Paper truncates long replies with `...`), the tool aborts rather than building a malformed command.
+- **Truncated item data** — if `/data get` folds the source item's SNBT (truncates long replies with `...`), the tool aborts rather than building a malformed command.
 - **Unreadable item** — if the source slot's item id can't be parsed, the tool aborts instead of sending an invalid command.
 - **Invalid slots** — source and destination must be integers `0`–`26` and must differ.
 
