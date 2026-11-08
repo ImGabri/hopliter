@@ -10,9 +10,12 @@ import java.util.regex.Pattern;
 final class FixtureRunner {
     static final int MAIN_SLOTS = 27;
     private static final String QUERY_PREFIX = " has the following entity data: ";
-    private static final String CLONE_COMMAND =
+    private static final String CLONE_COMMAND_WITH_COMPONENTS =
             "execute as %s if items entity @s inventory.%d * unless items entity @s inventory.%d * "
             + "run item replace entity @s inventory.%d with %s{components:%s} 1";
+    private static final String CLONE_COMMAND_PLAIN =
+            "execute as %s if items entity @s inventory.%d * unless items entity @s inventory.%d * "
+            + "run item replace entity @s inventory.%d with %s 1";
     private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
 
     record Settings(InetAddress host, int port, String player, int sourceSlot, int destSlot) {
@@ -80,13 +83,25 @@ final class FixtureRunner {
             if (source == null) {
                 return new Result(Status.ERROR, "The source slot inventory." + settings.sourceSlot + " is empty.");
             }
+            if (source.id() == null || source.id().isBlank() || source.id().equals("unknown")) {
+                return new Result(Status.ERROR,
+                        "The source slot inventory." + settings.sourceSlot
+                                + " does not contain a readable item.");
+            }
             Item dest = readItem(rcon, settings.player(), settings.destSlot);
             if (dest != null) {
                 return new Result(Status.ERROR, "The destination slot inventory." + settings.destSlot + " is occupied.");
             }
-            String command = CLONE_COMMAND.formatted(
-                    settings.player(), settings.sourceSlot, settings.destSlot,
-                    settings.destSlot, source.id(), source.componentsSnb());
+            String command;
+            if (source.components().isEmpty()) {
+                command = CLONE_COMMAND_PLAIN.formatted(
+                        settings.player(), settings.sourceSlot, settings.destSlot,
+                        settings.destSlot, source.id());
+            } else {
+                command = CLONE_COMMAND_WITH_COMPONENTS.formatted(
+                        settings.player(), settings.sourceSlot, settings.destSlot,
+                        settings.destSlot, source.id(), source.componentsSnb());
+            }
             String reply = rcon.command(command);
             if (reply != null && reply.startsWith("Replaced")) {
                 return new Result(Status.CLONED,
@@ -111,6 +126,10 @@ final class FixtureRunner {
             throw new IOException("The backend did not return item data for inventory." + slot + ".");
         }
         String payload = output.substring(prefix + QUERY_PREFIX.length());
+        if (Snbt.isFolded(payload)) {
+            throw new IOException("The backend truncated the item data for inventory." + slot
+                    + ". The item's data is too large for /data get to return fully.");
+        }
         try {
             if (!(Snbt.read(payload) instanceof Snbt.Compound compound)) {
                 throw new IOException("Expected an item compound for inventory." + slot + ".");
@@ -122,7 +141,10 @@ final class FixtureRunner {
                 return null;
             }
             Snbt.Tag idTag = data.get("id");
-            String id = idTag instanceof Snbt.Atom ? ((Snbt.Atom) idTag).value() : "unknown";
+            String id = idTag instanceof Snbt.Atom ? ((Snbt.Atom) idTag).value() : null;
+            if (id == null || id.isBlank()) {
+                return new Item(0, "unknown", Map.of());
+            }
             Snbt.Tag componentsTag = data.get("components");
             Map<String, Snbt.Tag> components = new LinkedHashMap<>();
             if (componentsTag instanceof Snbt.Compound c) {
@@ -135,10 +157,16 @@ final class FixtureRunner {
     }
 
     private static int number(Snbt.Tag tag) {
-        if (tag instanceof Snbt.Atom atom && (atom.type() == Snbt.Type.BYTE || atom.type() == Snbt.Type.INT)) {
-            return Integer.parseInt(atom.value());
+        if (tag instanceof Snbt.Atom atom) {
+            switch (atom.type()) {
+                case BYTE, SHORT, INT, LONG -> {
+                    return Integer.parseInt(atom.value());
+                }
+                default -> {
+                }
+            }
         }
-        throw new IllegalArgumentException("Expected a byte or int tag");
+        throw new IllegalArgumentException("Expected a byte, short, int, or long tag");
     }
 
     private record Item(int count, String id, Map<String, Snbt.Tag> components) {

@@ -1,70 +1,68 @@
 # hopliter
 
-Held Item UID Fixture for Minecraft staging tests.
+Item clone fixture for Minecraft staging tests.
 
-This Java 21 executable copies one unit of the test player's held item to the
-first main inventory slot (`inventory.0`) by default. Experimental Multiply
-creates a batch of one-unit copies in separate slots. Both modes use the
-authenticated staging server console and can verify a UID stored on the item.
+This Java 21 executable clones one item from a source inventory slot into a
+destination inventory slot on an authenticated staging RCON backend, so both
+slots end up filled with the same item (same id, components, and UID). By
+default it clones hotbar slot `1` into hotbar slot `2`. It preserves the source
+stack and does not consume or move it.
+
+## What it does
+
+1. Reads the item in the source slot via `/data get`.
+2. Confirms the destination slot is empty (`unless items ...`).
+3. Places a copy of the source item (count 1) into the destination slot via
+   `item replace entity @s inventory.<dest> with <id>{components:<snbt>} 1`.
+4. Reports whether both slots are now filled.
+
+The clone carries the source item's full component data, including any UID
+stored under `components`, so the two slots contain matching items.
 
 ## Run on staging
 
 1. Use an existing RCON endpoint on your Java 1.21.11 staging backend, reached
    at localhost or through an SSH tunnel. The default local port is 25575.
-2. Log in with the test player and hold a UID-bearing item. Keep the same item
-   selected during the run. For the default run, free the upper-left slot of the
-   main inventory.
-3. Open `HeldItemUidFixture.jar` from any folder with Java 21. In the dialog,
-   enter the local port, Java username, and RCON password. Select **Run once**.
-   Supply the optional UID path and type to get an exact comparison.
+2. Log in with the test player and place an item in the source hotbar slot
+   (default `1`). Keep the destination slot (default `2`) empty.
+3. Open `HeldItemUidFixture.jar` from any folder with Java 21. Enter the host,
+   port, player username, source/dest slot ids, and RCON password, then click
+   **Clone Hotbar 1 → 2**.
+4. Confirm both slots are filled in-game.
 
-For a terminal run, use this command and enter the password when prompted.
+For a terminal run:
 
 ```text
 java -jar HeldItemUidFixture.jar --host 127.0.0.1 --port 25575 --player TestPlayer
 ```
 
-## Experimental Multiply
-
-Tick **Experimental Multiply** in the dialog and enter a factor from 1 to 28,
-or add `--experimental-multiply N` in the terminal. The factor includes the
-original stack. With **×4**, the tool adds three one-unit copies to three
-empty main-inventory slots. A held stack of five stays at five. **×1** requests
-zero copies.
+Override the slots with `--slot` and `--dest-slot`:
 
 ```text
-java -jar HeldItemUidFixture.jar --player TestPlayer --experimental-multiply 4
+java -jar HeldItemUidFixture.jar --player TestPlayer --slot 1 --dest-slot 2
 ```
 
-The tool checks for enough free slots before it starts. It uses the captured
-hotbar slot as the source, compares the source again before each copy, and
-checks the selected hotbar slot and empty destination in the write command.
-Each copy is verified from its server-side readback.
-
-## Verify a UID
-
-UID paths are relative to the item's `components` compound. For example,
-append `--uid-path minecraft:custom_data.fixture_uid --uid-type string` to
-compare a string stored under the `fixture_uid` key in custom data. Quote
-individual path keys that contain dots, such as
-`minecraft:custom_data.PublicBukkitValues."demo.plugin:uid"`. Use
-`java -jar HeldItemUidFixture.jar --help` for the supported NBT types.
-
-## Interpret the result
+## Result meanings
 
 | Result | Meaning |
-| --- | --- |
-| `PASS` | The requested copies and their typed UIDs match at readback. |
-| `UID_UNVERIFIED` | The copy data and counts match. Supply a valid UID path and type for a direct UID check. |
-| `NO_COPY` | No write was sent. The result explains why. |
-| `PARTIAL` | Multiply stopped after confirming at least one copy. The report lists the copies it confirmed. |
-| `INCONCLUSIVE` | A write or readback could not be confirmed. The report identifies any uncertain slot. |
-| `RECOVERY_READBACK` | The tool inspected the attempted destinations and reported their current contents. |
+|---|---|
+| `CLONED` | The source item was copied into the destination slot; both slots are filled. |
+| `ERROR` | The clone did not complete. The message explains why (empty source, occupied destination, offline player, authentication failure, truncated item data, or a rejected command). |
 
-The tool records each destination before it attempts a write. After a partial
-or inconclusive run, reopen this version for the same endpoint and test player.
-That run only reads the attempted slots and exits. The readback shows current
-contents, so use staging logs to interpret any missing or rewritten copies.
+Exit codes: `0` = cloned, `1` = error, `2` = invalid arguments.
+
+## Failsafes and limits
+
+- **Localhost only** — the tool refuses to connect to non-loopback hosts. Use an SSH tunnel for remote staging.
+- **Empty source** — aborts with a clear message instead of sending a write.
+- **Occupied destination** — aborts before writing; never overwrites an existing slot.
+- **Offline player** — `/data get` reports the player missing; the tool aborts with no write sent.
+- **Bad authentication** — the RCON password is verified before any inventory command is sent.
+- **Truncated item data** — if `/data get` folds the source item's SNBT (Paper truncates long replies with `...`), the tool aborts rather than building a malformed command.
+- **Unreadable item** — if the source slot's item id can't be parsed, the tool aborts instead of sending an invalid command.
+- **Invalid slots** — source and destination must be integers `0`–`26` and must differ.
+
+This is a staging/test utility. Run it against a disposable staging server as a positive control; it does not interact with any anti-dupe system.
 
 ## Build and verify
 
@@ -72,12 +70,3 @@ Build with a JDK 21 and Maven using `mvn clean package`. The Maven build creates
 `target/helditem-uid-fixture-1.1.0.jar`. The ready-to-run JAR in this package was
 compiled with OpenJDK 21. Run `python3 tests/test_fixture.py` on Linux or macOS
 to test the packaged JAR against the scripted RCON endpoint.
-
-For a staging integration check, use a held stack of five with a known UID and
-at least three free main-inventory slots. Run **×4** with that UID path and
-type. Confirm count five in the source and one unit with the same UID in each
-of the three destinations. Repeat with only two free slots and check for
-`NO_COPY`. The included simulator tests also cover a selected slot change,
-a connection drop after the second write, and a recovery run with zero writes.
-Run the integration check on your actual backend to confirm its command
-syntax and English console output.
