@@ -14,6 +14,7 @@
   </properties>
 
   <build>
+    <finalName>Hopliter-Injector</finalName>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -32,6 +33,9 @@
             <manifest>
               <mainClass>com.example.helditemfixture.FixtureMain</mainClass>
             </manifest>
+            <manifestEntries>
+              <Agent-Class>com.example.helditemfixture.FixtureAgent</Agent-Class>
+            </manifestEntries>
           </archive>
         </configuration>
       </plugin>
