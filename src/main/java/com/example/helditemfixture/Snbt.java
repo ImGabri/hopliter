@@ -76,6 +76,135 @@ final class Snbt {
         return List.copyOf(keys);
     }
 
+    static boolean isFolded(String input) {
+        char quote = '\0';
+        for (int i = 0; i < input.length(); i++) {
+            char c = input.charAt(i);
+            if (quote != '\0') {
+                if (c == '\\') {
+                    i++;
+                } else if (c == quote) {
+                    quote = '\0';
+                }
+            } else if (c == '\'' || c == '"') {
+                quote = c;
+            } else if (c == '.' && input.startsWith("...", i)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    static String write(Tag tag) {
+        StringBuilder out = new StringBuilder();
+        writeTag(tag, out);
+        return out.toString();
+    }
+
+    private static void writeTag(Tag tag, StringBuilder out) {
+        if (tag instanceof Atom atom) {
+            writeAtom(atom, out);
+        } else if (tag instanceof Sequence sequence) {
+            switch (sequence.type()) {
+                case BYTE_ARRAY -> {
+                    out.append("[B;");
+                    boolean first = true;
+                    for (Tag v : sequence.values()) {
+                        if (!first) out.append(',');
+                        out.append(atomValue((Atom) v));
+                        first = false;
+                    }
+                    out.append(']');
+                }
+                case INT_ARRAY -> {
+                    out.append("[I;");
+                    boolean first = true;
+                    for (Tag v : sequence.values()) {
+                        if (!first) out.append(',');
+                        out.append(atomValue((Atom) v));
+                        first = false;
+                    }
+                    out.append(']');
+                }
+                case LONG_ARRAY -> {
+                    out.append("[L;");
+                    boolean first = true;
+                    for (Tag v : sequence.values()) {
+                        if (!first) out.append(',');
+                        out.append(atomValue((Atom) v));
+                        first = false;
+                    }
+                    out.append(']');
+                }
+                default -> {
+                    out.append('[');
+                    boolean first = true;
+                    for (Tag v : sequence.values()) {
+                        if (!first) out.append(',');
+                        writeTag(v, out);
+                        first = false;
+                    }
+                    out.append(']');
+                }
+            }
+        } else if (tag instanceof Compound compound) {
+            out.append('{');
+            boolean first = true;
+            for (Map.Entry<String, Tag> e : compound.values().entrySet()) {
+                if (!first) out.append(',');
+                out.append('"');
+                out.append(escapeString(e.getKey()));
+                out.append('"');
+                out.append(':');
+                writeTag(e.getValue(), out);
+                first = false;
+            }
+            out.append('}');
+        }
+    }
+
+    private static void writeAtom(Atom atom, StringBuilder out) {
+        switch (atom.type()) {
+            case STRING -> {
+                out.append('"');
+                out.append(escapeString(atom.value()));
+                out.append('"');
+            }
+            case BYTE -> out.append(atomValue(atom)).append('b');
+            case SHORT -> out.append(atomValue(atom)).append('s');
+            case INT -> out.append(atomValue(atom));
+            case LONG -> out.append(atomValue(atom)).append('l');
+            case FLOAT -> out.append(atomValue(atom)).append('f');
+            case DOUBLE -> out.append(atomValue(atom)).append('d');
+            default -> {
+                out.append('"');
+                out.append(escapeString(atom.value()));
+                out.append('"');
+            }
+        }
+    }
+
+    private static String atomValue(Atom atom) {
+        return atom.value();
+    }
+
+    private static String escapeString(String value) {
+        StringBuilder out = new StringBuilder();
+        for (char c : value.toCharArray()) {
+            switch (c) {
+                case '"' -> out.append("\\\"");
+                case '\\' -> out.append("\\\\");
+                case '\b' -> out.append("\\b");
+                case '\f' -> out.append("\\f");
+                case '\n' -> out.append("\\n");
+                case '\r' -> out.append("\\r");
+                case '\t' -> out.append("\\t");
+                default -> out.append(c);
+            }
+        }
+        return out.toString();
+    }
+
     static Tag atPath(Tag tag, List<String> keys) {
         for (String key : keys) {
             if (!(tag instanceof Compound compound)) {

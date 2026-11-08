@@ -6,7 +6,6 @@ import java.util.Arrays;
 import java.util.concurrent.ExecutionException;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
-import javax.swing.JCheckBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
@@ -33,32 +32,25 @@ final class FixtureGui {
         JTextField host = field(fields, "Staging RCON host", "127.0.0.1");
         JTextField port = field(fields, "RCON port", "25575");
         JTextField player = field(fields, "Test player's Java username", "");
-        JTextField uidPath = field(fields, "UID path (optional)", "");
-        JTextField uidType = field(fields, "UID type (optional)", "");
-        JCheckBox multiply = new JCheckBox("Experimental Multiply");
-        fields.add(multiply);
-        fields.add(new JLabel("Factor includes the original stack"));
-        JTextField factor = field(fields, "Multiply factor (1–28)", "4");
-        factor.setEnabled(false);
-        multiply.addActionListener(event -> factor.setEnabled(multiply.isSelected()));
+        JTextField sourceSlot = field(fields, "First slot id (source)", "0");
+        JTextField destSlot = field(fields, "Second slot id (destination)", "1");
         JPasswordField passwordField = new JPasswordField(23);
         fields.add(new JLabel("RCON password"));
         fields.add(passwordField);
         content.add(fields, BorderLayout.NORTH);
 
-        JTextArea report = new JTextArea("Hold the test item. The default run needs the first main inventory slot free.", 7, 46);
+        JTextArea report = new JTextArea("Click Duplicate Item to copy the first slot item into the second slot so both are filled.", 7, 46);
         report.setLineWrap(true);
         report.setWrapStyleWord(true);
         report.setEditable(false);
         content.add(new JScrollPane(report), BorderLayout.CENTER);
-        JButton run = new JButton("Run once");
-        content.add(run, BorderLayout.SOUTH);
-        run.addActionListener(event -> {
+        JButton create = new JButton("Duplicate Item");
+        content.add(create, BorderLayout.SOUTH);
+        create.addActionListener(event -> {
             FixtureRunner.Settings settings;
             try {
                 settings = FixtureRunner.Settings.parse(host.getText().strip(), port.getText().strip(),
-                        player.getText().strip(), uidPath.getText().strip(), uidType.getText().strip(),
-                        multiply.isSelected() ? factor.getText().strip() : null);
+                        player.getText().strip(), sourceSlot.getText().strip(), destSlot.getText().strip());
             } catch (IllegalArgumentException error) {
                 report.setText(error.getMessage());
                 return;
@@ -69,8 +61,8 @@ final class FixtureGui {
                 report.setText("Enter the staging RCON password.");
                 return;
             }
-            run.setEnabled(false);
-            report.setText("Checking the staging backend…");
+            create.setEnabled(false);
+            report.setText("Creating item on the staging backend…");
             new SwingWorker<FixtureRunner.Result, Void>() {
                 @Override
                 protected FixtureRunner.Result doInBackground() throws Exception {
@@ -91,13 +83,13 @@ final class FixtureGui {
                     } catch (ExecutionException error) {
                         report.setText("Error: " + error.getCause().getMessage());
                     } finally {
-                        run.setEnabled(true);
+                        create.setEnabled(true);
                     }
                 }
             }.execute();
         });
         window.setContentPane(content);
-        window.getRootPane().setDefaultButton(run);
+        window.getRootPane().setDefaultButton(create);
         window.pack();
         window.setLocationRelativeTo(null);
         window.setVisible(true);

@@ -10,7 +10,7 @@ import java.util.Set;
 
 public final class FixtureMain {
     private static final Set<String> OPTIONS = Set.of(
-            "--host", "--port", "--player", "--uid-path", "--uid-type", "--experimental-multiply");
+            "--host", "--port", "--player", "--slot", "--dest-slot");
 
     private FixtureMain() {}
 
@@ -23,16 +23,10 @@ public final class FixtureMain {
             System.out.println("""
                     HeldItemUidFixture
                     java -jar HeldItemUidFixture.jar --player TestPlayer
-                      [--host 127.0.0.1] [--port 25575]
-                      [--experimental-multiply N]
-                      [--uid-path minecraft:custom_data.uid --uid-type string]
+                      [--host 127.0.0.1] [--port 25575] [--slot 0] [--dest-slot 1]
 
                     Connects to an existing staging RCON endpoint on localhost or an SSH tunnel.
-                    Default mode makes one copy in the first main inventory slot.
-                    Experimental Multiply uses N−1 empty slots for one-unit copies (N = 1–28).
-                    Optional UID paths are relative to the item's components compound.
-                    UID types: string, byte, short, int, long, float, double, byte_array,
-                      int_array, long_array, list, compound.
+                    Duplicates the item in the first inventory slot into the second inventory slot so both are filled.
                     """);
             return;
         }
@@ -57,8 +51,7 @@ public final class FixtureMain {
         }
         FixtureRunner.Settings settings = FixtureRunner.Settings.parse(
                 options.getOrDefault("--host", "127.0.0.1"), options.getOrDefault("--port", "25575"),
-                options.get("--player"), options.getOrDefault("--uid-path", ""), options.getOrDefault("--uid-type", ""),
-                options.get("--experimental-multiply"));
+                options.get("--player"), options.getOrDefault("--slot", "0"), options.getOrDefault("--dest-slot", "1"));
         Console console = System.console();
         if (console == null) {
             throw new IllegalArgumentException("Open the JAR dialog or run from an interactive terminal.");
