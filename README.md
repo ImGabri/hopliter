@@ -6,12 +6,13 @@ stack's count and item components, including a UID stored in the item data.
 
 ## Paper multiplayer
 
-1. Put `Hopliter-Multiplayer.jar` in the Paper server's `plugins/` folder and
-   restart the server. The same JAR is also the desktop launcher.
+1. Put `Hopliter-Multiplayer-paper.jar` in the Paper server's `plugins/` folder
+   and restart the server. If you use Velocity, install the JAR on the Paper
+   backend that hosts the world. Keep one copy of the Hopliter plugin there.
 2. Use an operator account or have the server administrator grant your player
    `hopliter.copy`. Paper checks this permission before copying.
 3. Put the stack in hotbar slot 1 and leave slot 2 empty. In Minecraft, run
-   `/hoplitercopy`, or open the launcher and click **Copy Slot 1**.
+   `/hoplitercopy`. The Paper plugin works with the standard Minecraft client.
 
 Use `/hoplitercopy auto` for the first empty hotbar or main-inventory slot.
 A destination index from 1 to 35 selects a specific empty slot. The index is
@@ -55,4 +56,5 @@ mvn clean package
 python3 tests/test_fixture.py -v
 ```
 
-The build writes `target/Hopliter-Multiplayer.jar`.
+The build writes `target/Hopliter-Multiplayer-paper.jar` for the Paper server
+and `target/Hopliter-Multiplayer.jar` for the desktop launcher.

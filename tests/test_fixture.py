@@ -10,11 +10,29 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 JAR = ROOT / "target" / "Hopliter-Multiplayer.jar"
+PAPER_JAR = ROOT / "target" / "Hopliter-Multiplayer-paper.jar"
 
 
 def run_jar(*args):
     return subprocess.run(["java", "-Djava.awt.headless=true", "-jar", str(JAR), *args],
                           capture_output=True, text=True, timeout=10)
+
+
+class PaperPluginTests(unittest.TestCase):
+    def test_server_jar_only_contains_plugin_classes(self):
+        with ZipFile(PAPER_JAR) as jar:
+            classes = {name for name in jar.namelist() if name.endswith(".class")}
+            self.assertEqual(classes, {
+                "com/example/helditemfixture/CopySlots.class",
+                "com/example/helditemfixture/HopliterPlugin.class",
+            })
+            manifest = jar.read("META-INF/MANIFEST.MF").decode()
+            self.assertNotIn("Main-Class:", manifest)
+            self.assertNotIn("Agent-Class:", manifest)
+            plugin = jar.read("plugin.yml").decode()
+            self.assertIn("main: com.example.helditemfixture.HopliterPlugin", plugin)
+            self.assertIn("permission: hopliter.copy", plugin)
+            self.assertIn("default: op", plugin)
 
 
 class InjectorTests(unittest.TestCase):
