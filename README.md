@@ -1,36 +1,53 @@
-# Hopliter Injector
+# Hopliter Multiplayer
 
-An executable Java agent for Minecraft Java Edition 1.21.11. Open the launcher
-with a Java 21 JDK under the same desktop account as your Vanilla or Fabric
-Minecraft client.
+Hopliter copies the full stack in **hotbar slot 1** into an empty inventory
+slot. The default destination is **hotbar slot 2**. The copy includes the
+stack's count and item components, including a UID stored in the item data.
 
-[Download Hopliter-Injector.jar](Hopliter-Injector.jar?raw=true)
+## Paper multiplayer
 
-## Use
+1. Put `Hopliter-Multiplayer.jar` in the Paper server's `plugins/` folder and
+   restart the server. The same JAR is also the desktop launcher.
+2. Use an operator account or have the server administrator grant your player
+   `hopliter.copy`. Paper checks this permission before copying.
+3. Put the stack in hotbar slot 1 and leave slot 2 empty. In Minecraft, run
+   `/hoplitercopy`, or open the launcher and click **Copy Slot 1**.
 
-1. Hold an item in a single-player world or a LAN world you host.
-2. Open `Hopliter-Injector.jar`, or run `java -jar Hopliter-Injector.jar`.
-3. Select Minecraft and click **Attach and Copy Held Item**. **auto** selects
-   the first free hotbar or main-inventory slot. You can enter a specific
-   empty slot from 0 to 35.
+Use `/hoplitercopy auto` for the first empty hotbar or main-inventory slot.
+A destination index from 1 to 35 selects a specific empty slot. The index is
+zero-based, so 1 selects the visible hotbar slot 2. Minecraft chat reports
+whether the server completed the copy. The command uses the player's existing
+Minecraft session.
 
-The agent copies one item on Minecraft's integrated server. It preserves the
-item components, including a UID stored in those components. The source
-stack keeps its original count. The launcher works without RCON or credentials.
+| Minecraft and Paper | Java for the game and server |
+| --- | --- |
+| 1.21.11 | 21 |
+| 26.3 | 25 |
 
-## Attach from a terminal
+## Launcher
 
-```text
-java -jar Hopliter-Injector.jar --list
-java -jar Hopliter-Injector.jar --attach <pid> [auto|0-35]
+Open `Hopliter-Multiplayer.jar` with JDK 21 or newer, under the same OS account
+as Minecraft. The launcher also supports integrated single-player and hosted
+LAN worlds. Select Minecraft and click **Copy Slot 1**.
+
+```sh
+java -jar Hopliter-Multiplayer.jar --list
+java -jar Hopliter-Multiplayer.jar --attach <pid>
+java -jar Hopliter-Multiplayer.jar --attach <pid> auto
 ```
 
-For a JVM that requires explicit opt-in, start Minecraft with
-`-XX:+EnableDynamicAgentLoading` in its JVM arguments.
+On a JVM that requires explicit opt-in, add `-XX:+EnableDynamicAgentLoading` to
+Minecraft's JVM arguments and restart the game. The in-game server command is
+also available directly from chat. Restart Minecraft when switching between
+Hopliter injector builds.
 
-## Build
+## Build and verify
 
-Run `mvn clean package` with JDK 21. The output is
-`target/Hopliter-Injector.jar`.
+Use JDK 21 and Maven.
 
-Run `python3 tests/test_fixture.py` to check the packaged launcher and agent.
+```sh
+mvn clean package
+python3 tests/test_fixture.py -v
+```
+
+The build writes `target/Hopliter-Multiplayer.jar`.

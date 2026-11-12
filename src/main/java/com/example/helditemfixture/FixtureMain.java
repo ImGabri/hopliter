@@ -12,31 +12,33 @@ public final class FixtureMain {
         }
         if (args.length == 0 || (args.length == 1 && args[0].equals("--help"))) {
             System.out.println("""
-                    Hopliter Injector for Minecraft Java 1.21.11
-                    java -jar Hopliter-Injector.jar                  Open the attach launcher
-                    java -jar Hopliter-Injector.jar --list           List Minecraft clients
-                    java -jar Hopliter-Injector.jar --attach <pid> [auto|0-35]
+                    Hopliter slot-copy fixture for Minecraft Java 1.21.11 / 26.3
+                    java -jar Hopliter-Multiplayer.jar                 Open the attach launcher
+                    java -jar Hopliter-Multiplayer.jar --list          List Minecraft clients
+                    java -jar Hopliter-Multiplayer.jar --attach <pid> [auto|1-35]
 
-                    Open a single-player world or host a LAN world. Select Minecraft and click
-                    Attach and Copy Held Item to place one copy in an empty inventory slot.
+                    Copies the full item stack in HOTBAR SLOT 1 to HOTBAR SLOT 2 by default.
+                    Destination index 1 means hotbar slot 2. Use auto for the first empty slot.
+                    Multiplayer requires this JAR on Paper and the hopliter.copy permission.
                     """);
             return;
         }
         try {
             if (args.length == 1 && args[0].equals("--list")) {
-                var targets = AttachLauncher.targets();
+                var targets = MinecraftProcesses.find();
                 if (targets.isEmpty()) {
-                    System.out.println("No running Minecraft Java client found.");
+                    System.out.println("No Minecraft Java client detected. You can pass its PID to --attach.");
                 }
                 targets.forEach(System.out::println);
             } else if ((args.length == 2 || args.length == 3) && args[0].equals("--attach")) {
-                String result = AttachLauncher.attachAndCopy(args[1], args.length == 3 ? args[2] : "auto");
+                String result = AttachLauncher.attachAndCopy(args[1], args.length == 3 ? args[2]
+                        : Integer.toString(CopySlots.DEFAULT_DESTINATION));
                 System.out.println(result);
-                if (!result.startsWith("Copied one item ")) {
+                if (!result.startsWith("Copied full stack ") && !result.startsWith(FixtureRunner.COMMAND_SENT)) {
                     System.exit(1);
                 }
             } else {
-                throw new IllegalArgumentException("Use --help, --list, or --attach <pid> [auto|0-35].");
+                throw new IllegalArgumentException("Use --help, --list, or --attach <pid> [auto|1-35].");
             }
         } catch (IllegalArgumentException error) {
             System.err.println(error.getMessage());

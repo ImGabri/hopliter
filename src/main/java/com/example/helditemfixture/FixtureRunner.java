@@ -11,9 +11,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 final class FixtureRunner {
-    private static final int AUTO_SLOT = -1;
-    private static final int INVENTORY_SIZE = 36;
-    private static final Pattern GAME_VERSION = Pattern.compile("\"id\"\\s*:\\s*\"1\\.21\\.11\"");
+    static final String COMMAND_SENT = "Sent /" + CopySlots.COMMAND;
+    private static final Pattern GAME_VERSION = Pattern.compile("\\\"id\\\"\\s*:\\s*\\\"(?:1\\.21\\.11|26\\.3)\\\"");
 
     private final Object client;
     private final Method integratedServer;
@@ -22,74 +21,63 @@ final class FixtureRunner {
     private final Method playerList;
     private final Method findPlayer;
     private final Method playerInventory;
-    private final Method selectedItem;
     private final Method freeSlot;
     private final Method getItem;
     private final Method setItem;
     private final Method setChanged;
     private final Method isEmpty;
-    private final Method copyOne;
+    private final Method copyStack;
+    private final MultiplayerCommands multiplayer;
 
     static FixtureRunner bind(Class<?>[] loadedClasses) throws ReflectiveOperationException, IOException {
         for (Class<?> candidate : loadedClasses) {
             String name = candidate.getName();
-            if (name.equals("gfj") || name.equals("net.minecraft.class_310")) {
+            if (name.equals("gfj") || name.equals("net.minecraft.class_310")
+                    || name.equals("net.minecraft.client.Minecraft")) {
                 try (var version = candidate.getResourceAsStream("/version.json")) {
                     if (version != null && GAME_VERSION.matcher(
                             new String(version.readNBytes(8192), StandardCharsets.UTF_8)).find()) {
-                        return new FixtureRunner(candidate, name.equals("net.minecraft.class_310"));
+                        return new FixtureRunner(candidate, name.equals("net.minecraft.class_310"),
+                                name.equals("net.minecraft.client.Minecraft"));
                     }
                 }
             }
         }
-        throw new IllegalStateException("Wait for the Minecraft Java 1.21.11 title screen before attaching.");
+        throw new IllegalStateException("Start Minecraft Java 1.21.11 or 26.3 before attaching.");
     }
 
-    private FixtureRunner(Class<?> clientType, boolean fabric) throws ReflectiveOperationException {
-        // Minecraft 1.21.11 uses Mojang's obfuscated names or Fabric's intermediary names at runtime.
-        client = clientType.getMethod(fabric ? "method_1551" : "V").invoke(null);
+    private FixtureRunner(Class<?> clientType, boolean fabric, boolean modern) throws ReflectiveOperationException {
+        // 26.3 uses official unobfuscated member names. 1.21.11 may use obfuscated
+        // Vanilla names or intermediary Fabric names.
+        client = clientType.getMethod(modern ? "getInstance" : fabric ? "method_1551" : "V").invoke(null);
         if (client == null) {
             throw new IllegalStateException("Wait for Minecraft to finish starting before attaching.");
         }
-        integratedServer = clientType.getMethod(fabric ? "method_1576" : "aa");
-        localPlayer = clientType.getField(fabric ? "field_1724" : "s");
-        playerUuid = localPlayer.getType().getMethod(fabric ? "method_5667" : "cY");
-        playerList = integratedServer.getReturnType().getMethod(fabric ? "method_3760" : "aj");
-        findPlayer = playerList.getReturnType().getMethod(fabric ? "method_14602" : "b", UUID.class);
-        playerInventory = findPlayer.getReturnType().getMethod(fabric ? "method_31548" : "gK");
+        integratedServer = clientType.getMethod(modern ? "getSingleplayerServer" : fabric ? "method_1576" : "aa");
+        localPlayer = clientType.getField(modern ? "player" : fabric ? "field_1724" : "s");
+        playerUuid = localPlayer.getType().getMethod(modern ? "getUUID" : fabric ? "method_5667" : "cY");
+        playerList = integratedServer.getReturnType().getMethod(modern ? "getPlayerList" : fabric ? "method_3760" : "aj");
+        findPlayer = playerList.getReturnType().getMethod(modern ? "getPlayer" : fabric ? "method_14602" : "b", UUID.class);
+        playerInventory = findPlayer.getReturnType().getMethod(modern ? "getInventory" : fabric ? "method_31548" : "gK");
         Class<?> inventory = playerInventory.getReturnType();
-        selectedItem = inventory.getMethod(fabric ? "method_7391" : "h");
-        freeSlot = inventory.getMethod(fabric ? "method_7376" : "k");
-        getItem = inventory.getMethod(fabric ? "method_5438" : "a", int.class);
-        Class<?> stack = selectedItem.getReturnType();
-        setItem = inventory.getMethod(fabric ? "method_5447" : "a", int.class, stack);
-        setChanged = inventory.getMethod(fabric ? "method_5431" : "e");
-        isEmpty = stack.getMethod(fabric ? "method_7960" : "f");
-        copyOne = stack.getMethod(fabric ? "method_46651" : "c", int.class);
+        freeSlot = inventory.getMethod(modern ? "getFreeSlot" : fabric ? "method_7376" : "k");
+        getItem = inventory.getMethod(modern ? "getItem" : fabric ? "method_5438" : "a", int.class);
+        Class<?> stack = getItem.getReturnType();
+        setItem = inventory.getMethod(modern ? "setItem" : fabric ? "method_5447" : "a", int.class, stack);
+        setChanged = inventory.getMethod(modern ? "setChanged" : fabric ? "method_5431" : "e");
+        isEmpty = stack.getMethod(modern ? "isEmpty" : fabric ? "method_7960" : "f");
+        copyStack = stack.getMethod(modern ? "copy" : fabric ? "method_7972" : "v");
+        multiplayer = MultiplayerCommands.bind(clientType, fabric, modern);
     }
 
-    static int parseDestination(String text) {
-        String value = text.strip();
-        if (value.equalsIgnoreCase("auto") || value.isEmpty()) {
-            return AUTO_SLOT;
+    CompletableFuture<String> copySlotOne(int destination) {
+        if (destination == CopySlots.SOURCE) {
+            return CompletableFuture.completedFuture("Choose a different destination from hotbar slot 1.");
         }
-        try {
-            int slot = Integer.parseInt(value);
-            if (slot >= 0 && slot < INVENTORY_SIZE) {
-                return slot;
-            }
-        } catch (NumberFormatException ignored) {
-            // Invalid text and out-of-range numbers share the same message.
-        }
-        throw new IllegalArgumentException("Enter auto or a slot from 0 to 35.");
-    }
-
-    CompletableFuture<String> copyHeldItem(int destination) {
         CompletableFuture<String> result = new CompletableFuture<>();
-        // Use the result as a lock so a timed-out request cannot later change the inventory.
         CompletableFuture.delayedExecutor(15, TimeUnit.SECONDS).execute(() -> {
             synchronized (result) {
-                result.complete("The local world did not respond. Return to the game and try again.");
+                result.complete("Minecraft did not respond. Return to the game and try again.");
             }
         });
         try {
@@ -107,8 +95,16 @@ final class FixtureRunner {
         try {
             Object server = integratedServer.invoke(client);
             Object player = localPlayer.get(client);
-            if (server == null || player == null) {
-                result.complete("Open a single-player world or a LAN world you host.");
+            if (player == null) {
+                result.complete("Join a world or Paper server before copying.");
+                return;
+            }
+            if (server == null) {
+                synchronized (result) {
+                    if (!result.isDone()) {
+                        result.complete(multiplayer.requestCopy(client, destination));
+                    }
+                }
                 return;
             }
             UUID owner = (UUID) playerUuid.invoke(player);
@@ -134,20 +130,51 @@ final class FixtureRunner {
             return "The local player left the world. Rejoin before copying.";
         }
         Object inventory = playerInventory.invoke(player);
-        Object held = selectedItem.invoke(inventory);
-        if ((boolean) isEmpty.invoke(held)) {
-            return "Hold an item in your main hand first.";
+        Object original = getItem.invoke(inventory, CopySlots.SOURCE);
+        if ((boolean) isEmpty.invoke(original)) {
+            return "Hotbar slot 1 is empty. Put the item in the first hotbar slot.";
         }
-        int slot = destination == AUTO_SLOT ? (int) freeSlot.invoke(inventory) : destination;
-        if (slot < 0) {
-            return "Your hotbar and main inventory are full.";
+        int slot = destination == CopySlots.AUTO ? (int) freeSlot.invoke(inventory) : destination;
+        if (slot < 0 || slot >= CopySlots.INVENTORY_SIZE) {
+            return "No empty slot is available in the 36-slot main inventory.";
         }
         if (!(boolean) isEmpty.invoke(getItem.invoke(inventory, slot))) {
-            return "Slot " + slot + " is occupied. Choose an empty slot or use auto.";
+            return "Destination slot " + (slot + 1) + " is occupied. Choose an empty slot.";
         }
-        setItem.invoke(inventory, slot, copyOne.invoke(held, 1));
+        // A deep ItemStack copy preserves count, custom components and UID values.
+        // The server executes this mutation on its own main thread.
+        setItem.invoke(inventory, slot, copyStack.invoke(original));
         setChanged.invoke(inventory);
-        return "Copied one item into slot " + slot + " with its original item data.";
+        return "Copied full stack from hotbar slot 1 into inventory slot " + (slot + 1)
+                + " with its original item data.";
+    }
+
+    private record MultiplayerCommands(Method connection, Method commands, Method root, Method child,
+                                       Method sendCommand) {
+        static MultiplayerCommands bind(Class<?> clientType, boolean fabric, boolean modern)
+                throws ReflectiveOperationException {
+            Method connection = clientType.getMethod(modern ? "getConnection" : fabric ? "method_1562" : "R");
+            Class<?> listener = connection.getReturnType();
+            Method commands = listener.getMethod(modern ? "getCommands" : fabric ? "method_2886" : "t");
+            Method root = commands.getReturnType().getMethod("getRoot");
+            Method child = root.getReturnType().getMethod("getChild", String.class);
+            Method send = listener.getMethod(modern ? "sendCommand" : fabric ? "method_45730" : "d", String.class);
+            return new MultiplayerCommands(connection, commands, root, child, send);
+        }
+
+        String requestCopy(Object client, int destination) throws ReflectiveOperationException {
+            Object listener = connection.invoke(client);
+            if (listener == null) {
+                return "Join a Paper server before copying.";
+            }
+            Object availableCommands = root.invoke(commands.invoke(listener));
+            if (child.invoke(availableCommands, CopySlots.COMMAND) == null) {
+                return "Multiplayer requires Hopliter on the server and the hopliter.copy permission.";
+            }
+            String slot = destination == CopySlots.AUTO ? "auto" : Integer.toString(destination);
+            sendCommand.invoke(listener, CopySlots.COMMAND + " " + slot);
+            return COMMAND_SENT + " " + slot + ". Check Minecraft chat for the server result.";
+        }
     }
 
     private static void reportError(CompletableFuture<String> result, Exception error) {
