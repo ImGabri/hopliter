@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 final class FixtureRunner {
-    static final String COMMAND_SENT = "Sent /" + CopySlots.COMMAND;
+    static final String COMMAND_SENT = "Sent /";
     private static final Pattern GAME_VERSION = Pattern.compile("\\\"id\\\"\\s*:\\s*\\\"(?:1\\.21\\.11|26\\.3)\\\"");
 
     private final Object client;
@@ -21,6 +21,7 @@ final class FixtureRunner {
     private final Method playerList;
     private final Method findPlayer;
     private final Method playerInventory;
+    private final Method localInventory;
     private final Method freeSlot;
     private final Method getItem;
     private final Method setItem;
@@ -59,6 +60,7 @@ final class FixtureRunner {
         playerList = integratedServer.getReturnType().getMethod(modern ? "getPlayerList" : fabric ? "method_3760" : "aj");
         findPlayer = playerList.getReturnType().getMethod(modern ? "getPlayer" : fabric ? "method_14602" : "b", UUID.class);
         playerInventory = findPlayer.getReturnType().getMethod(modern ? "getInventory" : fabric ? "method_31548" : "gK");
+        localInventory = localPlayer.getType().getMethod(playerInventory.getName());
         Class<?> inventory = playerInventory.getReturnType();
         freeSlot = inventory.getMethod(modern ? "getFreeSlot" : fabric ? "method_7376" : "k");
         getItem = inventory.getMethod(modern ? "getItem" : fabric ? "method_5438" : "a", int.class);
@@ -96,13 +98,13 @@ final class FixtureRunner {
             Object server = integratedServer.invoke(client);
             Object player = localPlayer.get(client);
             if (player == null) {
-                result.complete("Join a world or Paper server before copying.");
+                result.complete("Join a world or multiplayer server before copying.");
                 return;
             }
             if (server == null) {
                 synchronized (result) {
                     if (!result.isDone()) {
-                        result.complete(multiplayer.requestCopy(client, destination));
+                        result.complete(requestMultiplayerCopy(player, destination));
                     }
                 }
                 return;
@@ -149,6 +151,38 @@ final class FixtureRunner {
                 + " with its original item data.";
     }
 
+    private String requestMultiplayerCopy(Object player, int destination) throws ReflectiveOperationException {
+        Object listener = multiplayer.connection().invoke(client);
+        if (listener == null) {
+            return "Join a multiplayer server before copying.";
+        }
+        Object availableCommands = multiplayer.commandRoot(listener);
+        if (multiplayer.hasCommand(availableCommands, CopySlots.COMMAND)) {
+            String slot = destination == CopySlots.AUTO ? "auto" : Integer.toString(destination);
+            String command = CopySlots.COMMAND + " " + slot;
+            multiplayer.sendCommand().invoke(listener, command);
+            return COMMAND_SENT + command + ". Check Minecraft chat for the server result.";
+        }
+        if (!multiplayer.hasCommand(availableCommands, "execute") || !multiplayer.hasCommand(availableCommands, "item")) {
+            return "Multiplayer needs server operator permission or the Paper plugin with hopliter.copy.";
+        }
+
+        int slot = destination;
+        if (slot == CopySlots.AUTO) {
+            Object inventory = localInventory.invoke(player);
+            if ((boolean) isEmpty.invoke(getItem.invoke(inventory, CopySlots.SOURCE))) {
+                return "Hotbar slot 1 is empty. Put the item in the first hotbar slot.";
+            }
+            slot = (int) freeSlot.invoke(inventory);
+            if (slot < 1 || slot >= CopySlots.INVENTORY_SIZE) {
+                return "No empty slot is available in the 36-slot main inventory.";
+            }
+        }
+        // The server checks both slots and enforces command permissions on execution.
+        multiplayer.sendCommand().invoke(listener, CopySlots.vanillaCopyCommand(slot));
+        return COMMAND_SENT + "execute for inventory slot " + (slot + 1) + ". Check Minecraft chat for the server result.";
+    }
+
     private record MultiplayerCommands(Method connection, Method commands, Method root, Method child,
                                        Method sendCommand) {
         static MultiplayerCommands bind(Class<?> clientType, boolean fabric, boolean modern)
@@ -162,18 +196,12 @@ final class FixtureRunner {
             return new MultiplayerCommands(connection, commands, root, child, send);
         }
 
-        String requestCopy(Object client, int destination) throws ReflectiveOperationException {
-            Object listener = connection.invoke(client);
-            if (listener == null) {
-                return "Join a Paper server before copying.";
-            }
-            Object availableCommands = root.invoke(commands.invoke(listener));
-            if (child.invoke(availableCommands, CopySlots.COMMAND) == null) {
-                return "Multiplayer requires Hopliter on the server and the hopliter.copy permission.";
-            }
-            String slot = destination == CopySlots.AUTO ? "auto" : Integer.toString(destination);
-            sendCommand.invoke(listener, CopySlots.COMMAND + " " + slot);
-            return COMMAND_SENT + " " + slot + ". Check Minecraft chat for the server result.";
+        Object commandRoot(Object listener) throws ReflectiveOperationException {
+            return root.invoke(commands.invoke(listener));
+        }
+
+        boolean hasCommand(Object availableCommands, String name) throws ReflectiveOperationException {
+            return child.invoke(availableCommands, name) != null;
         }
     }
 

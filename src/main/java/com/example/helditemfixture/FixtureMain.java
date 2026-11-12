@@ -19,7 +19,8 @@ public final class FixtureMain {
 
                     Copies the full item stack in HOTBAR SLOT 1 to HOTBAR SLOT 2 by default.
                     Destination index 1 means hotbar slot 2. Use auto for the first empty slot.
-                    Multiplayer requires this JAR on Paper and the hopliter.copy permission.
+                    Vanilla multiplayer uses your existing operator permission (level 2 or higher).
+                    Paper also supports hopliter.copy when the Hopliter plugin is installed.
                     """);
             return;
         }

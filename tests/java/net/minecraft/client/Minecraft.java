@@ -1,4 +1,6 @@
 package net.minecraft.client;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
 
@@ -14,11 +16,11 @@ public class Minecraft implements Executor {
     @Override public void execute(Runnable runnable) { runnable.run(); }
 
     public static class Connection {
-        public boolean copyCommandAvailable;
+        public final Set<String> advertisedCommands = new HashSet<>();
         public String sentCommand;
 
         public CommandTree getCommands() {
-            return new CommandTree(copyCommandAvailable);
+            return new CommandTree(advertisedCommands);
         }
 
         public void sendCommand(String command) {
@@ -26,13 +28,13 @@ public class Minecraft implements Executor {
         }
     }
 
-    public record CommandTree(boolean copyCommandAvailable) {
+    public record CommandTree(Set<String> advertisedCommands) {
         public CommandTree getRoot() {
             return this;
         }
 
         public Object getChild(String name) {
-            return copyCommandAvailable && name.equals("hoplitercopy") ? this : null;
+            return advertisedCommands.contains(name) ? this : null;
         }
     }
 

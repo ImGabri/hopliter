@@ -28,13 +28,48 @@ public class FixtureRunnerTest {
         check(CopySlots.parseDestination("1") == 1, "Slot 2 index parsing");
         check(CopySlots.parseDestination("auto") == -1, "Auto index parsing");
         client.server = null;
-        client.connection = new Minecraft.Connection();
+        Minecraft.Connection connection = new Minecraft.Connection();
+        client.connection = connection;
         check(runner.copySlotOne(3).join().contains("hopliter.copy"), "Unavailable command should be reported");
-        check(client.connection.sentCommand == null, "No command should be sent when the server omits it");
-        client.connection.copyCommandAvailable = true;
-        check(runner.copySlotOne(3).join().startsWith(FixtureRunner.COMMAND_SENT), "Expected command dispatch");
-        check(client.connection.sentCommand.equals("hoplitercopy 3"), "Expected the validated destination");
-        check(inv.getItem(3).isEmpty(), "A remote request must leave client inventory alone");
-        System.out.println("PASS: local stack and UID, empty-slot checks, advertised multiplayer command");
+        check(connection.sentCommand == null, "No command should be sent when the server omits it");
+
+        connection.advertisedCommands.add("execute");
+        runner.copySlotOne(3).join();
+        check(connection.sentCommand == null, "Execute alone should not enable vanilla copying");
+        connection.advertisedCommands.clear();
+        connection.advertisedCommands.add("item");
+        runner.copySlotOne(3).join();
+        check(connection.sentCommand == null, "Item alone should not enable vanilla copying");
+
+        connection.advertisedCommands.add("execute");
+        connection.advertisedCommands.add("hoplitercopy");
+        check(runner.copySlotOne(3).join().startsWith("Sent /hoplitercopy"), "Expected Paper dispatch");
+        check("hoplitercopy 3".equals(connection.sentCommand), "Paper should take precedence when advertised");
+
+        connection.advertisedCommands.remove("hoplitercopy");
+        Minecraft.ItemStack source = inv.getItem(0);
+        inv.changed = false;
+        check(runner.copySlotOne(3).join().startsWith("Sent /execute"), "Expected vanilla dispatch");
+        check(("execute if items entity @s hotbar.0 * unless items entity @s hotbar.3 *"
+                + " run item replace entity @s hotbar.3 from entity @s hotbar.0").equals(connection.sentCommand),
+                "The command must guard both slots and copy within the operator's own inventory");
+        check(runner.copySlotOne(9).join().startsWith("Sent /execute"), "Expected main inventory dispatch");
+        check(connection.sentCommand.contains("unless items entity @s inventory.0 *"
+                + " run item replace entity @s inventory.0 from entity @s hotbar.0"),
+                "Slot index 9 must map to inventory.0");
+
+        check(runner.copySlotOne(CopySlots.AUTO).join().startsWith("Sent /execute"), "Expected auto dispatch");
+        check(connection.sentCommand.contains("run item replace entity @s hotbar.3 from entity @s hotbar.0"),
+                "Auto must choose the first empty slot after the three occupied hotbar slots");
+        check(inv.getItem(3).isEmpty() && inv.getItem(9).isEmpty(), "Remote dispatch must leave destinations alone");
+        check(inv.getItem(0) == source && !inv.changed, "Remote dispatch must leave the local inventory alone");
+
+        for (int slot = 3; slot < CopySlots.INVENTORY_SIZE; slot++) {
+            inv.setItem(slot, new Minecraft.ItemStack("full", 1));
+        }
+        connection.sentCommand = null;
+        check(runner.copySlotOne(CopySlots.AUTO).join().contains("No empty slot"), "Expected full inventory feedback");
+        check(connection.sentCommand == null, "A full inventory should block an auto request");
+        System.out.println("PASS: local copy, Paper dispatch, and permission-gated vanilla dispatch");
     }
 }
