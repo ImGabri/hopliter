@@ -25,11 +25,16 @@ public final class FixtureMain {
         }
         try {
             if (args.length == 1 && args[0].equals("--list")) {
-                var targets = MinecraftProcesses.find();
-                if (targets.isEmpty()) {
+                var discovery = MinecraftProcesses.find();
+                discovery.targets().forEach(System.out::println);
+                if (discovery.incomplete()) {
+                    System.err.println(MinecraftProcesses.DISCOVERY_INCOMPLETE);
+                    if (discovery.targets().isEmpty()) {
+                        System.exit(1);
+                    }
+                } else if (discovery.targets().isEmpty()) {
                     System.out.println("No Minecraft Java client detected. You can pass its PID to --attach.");
                 }
-                targets.forEach(System.out::println);
             } else if ((args.length == 2 || args.length == 3) && args[0].equals("--attach")) {
                 String result = AttachLauncher.attachAndCopy(args[1], args.length == 3 ? args[2]
                         : Integer.toString(CopySlots.DEFAULT_DESTINATION));
@@ -43,8 +48,8 @@ public final class FixtureMain {
         } catch (IllegalArgumentException error) {
             System.err.println(error.getMessage());
             System.exit(2);
-        } catch (NoClassDefFoundError | Exception error) {
-            System.err.println("Attach error: " + AttachLauncher.errorMessage(error));
+        } catch (LinkageError | Exception error) {
+            System.err.println(AttachLauncher.attachError(error));
             System.exit(1);
         }
     }

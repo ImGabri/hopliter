@@ -173,12 +173,13 @@ final class FixtureRunner {
             }
             String slot = destination == CopySlots.AUTO ? "auto" : Integer.toString(destination);
             sendCommand.invoke(listener, CopySlots.COMMAND + " " + slot);
-            return COMMAND_SENT + " " + slot + ". Check Minecraft chat for the server result.";
+            return COMMAND_SENT + " " + slot + ". Check Minecraft chat for server confirmation.";
         }
     }
 
     private static void reportError(CompletableFuture<String> result, Exception error) {
-        error.printStackTrace(System.err);
+        Throwable cause = error.getCause();
+        System.err.println("Hopliter copy failed: " + (cause == null ? error : cause).getClass().getSimpleName());
         result.complete("Minecraft could not complete the copy. Check the game log and inventory.");
     }
 }

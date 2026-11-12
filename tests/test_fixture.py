@@ -2,7 +2,9 @@
 import os
 from pathlib import Path
 import subprocess
+import sys
 from tempfile import TemporaryDirectory
+import time
 import unittest
 from zipfile import ZipFile
 
@@ -62,6 +64,34 @@ class InjectorTests(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("PASS", result.stdout)
+
+    @unittest.skipUnless(sys.platform == "win32", "requires a Windows desktop")
+    def test_windows_discovers_game_window_when_another_window_is_primary(self):
+        source = ROOT / "tests/java/com/example/helditemfixture/WindowsWindowFixture.java"
+        with TemporaryDirectory() as directory:
+            ready = Path(directory) / "ready"
+            subprocess.run(["javac", "--release", "21", "-d", directory, str(source)],
+                           check=True, capture_output=True, text=True, timeout=15)
+            # Disable the JVM list entry so only Windows discovery can find this PID.
+            with subprocess.Popen(
+                ["java", "-XX:-UsePerfData", "-cp", directory,
+                 "com.example.helditemfixture.WindowsWindowFixture", str(ready), "--accessToken", "fixture-secret"],
+                stdin=subprocess.PIPE,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            ) as client:
+                try:
+                    deadline = time.monotonic() + 10
+                    while client.poll() is None and not ready.exists() and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    self.assertTrue(ready.exists(), "Test windows did not open")
+                    result = run_jar("--list")
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertTrue(any(line.startswith("Minecraft (game window) ")
+                                        and line.endswith(f"PID {client.pid}")
+                                        for line in result.stdout.splitlines()), result.stdout)
+                    self.assertNotIn("fixture-secret", result.stdout + result.stderr)
+                finally:
+                    client.terminate()
 
 
 if __name__ == "__main__":

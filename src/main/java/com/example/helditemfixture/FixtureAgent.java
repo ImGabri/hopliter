@@ -26,7 +26,7 @@ public final class FixtureAgent {
             result = runner.copySlotOne(slot).get();
         } catch (IllegalStateException error) {
             result = error.getMessage();
-        } catch (NoSuchMethodException | NoSuchFieldException error) {
+        } catch (ReflectiveOperationException error) {
             result = "Select a Vanilla or Fabric client for Minecraft Java 1.21.11 or 26.3.";
         }
         Files.writeString(response, result, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING,

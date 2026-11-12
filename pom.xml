@@ -19,6 +19,11 @@
   </repositories>
   <dependencies>
     <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna</artifactId>
+      <version>5.18.1</version>
+    </dependency>
+    <dependency>
       <groupId>io.papermc.paper</groupId>
       <artifactId>paper-api</artifactId>
       <version>1.21.11-R0.1-SNAPSHOT</version>
@@ -43,8 +48,29 @@
             <mainClass>com.example.helditemfixture.FixtureMain</mainClass>
           </manifest><manifestEntries>
             <Agent-Class>com.example.helditemfixture.FixtureAgent</Agent-Class>
+            <Enable-Native-Access>ALL-UNNAMED</Enable-Native-Access>
           </manifestEntries></archive>
         </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.1</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <filters>
+                <filter>
+                  <artifact>net.java.dev.jna:jna</artifact>
+                  <excludes><exclude>META-INF/MANIFEST.MF</exclude></excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

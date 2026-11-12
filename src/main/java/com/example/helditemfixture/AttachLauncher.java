@@ -10,7 +10,6 @@ import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.ExecutionException;
 import javax.swing.BorderFactory;
@@ -30,20 +29,26 @@ final class AttachLauncher {
     static String attachAndCopy(String pid, String slot) throws IOException, AttachNotSupportedException,
             AgentInitializationException, AgentLoadException, URISyntaxException {
         if (!MinecraftProcesses.isPid(pid)) {
-            throw new IllegalArgumentException("Enter a numeric Minecraft process ID from the process list.");
-        }
-        Path jar = Path.of(AttachLauncher.class.getProtectionDomain().getCodeSource().getLocation().toURI());
-        if (!Files.isRegularFile(jar)) {
-            throw new IOException("Open the packaged Hopliter-Multiplayer.jar to attach.");
+            throw new IllegalArgumentException("Enter a numeric Minecraft process ID from the list or Task Manager.");
         }
         CopySlots.parseDestination(slot);
+        Path jar = Path.of(AttachLauncher.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+        if (!Files.isRegularFile(jar)) {
+            throw new IllegalArgumentException("Open the packaged Hopliter-Multiplayer.jar to attach.");
+        }
+        if (ProcessHandle.of(Long.parseLong(pid)).isEmpty()) {
+            throw new AttachNotSupportedException();
+        }
         Path response = Files.createTempFile("hopliter-result-", ".txt").toAbsolutePath();
         try {
             VirtualMachine target = VirtualMachine.attach(pid);
             try {
                 Properties properties = target.getSystemProperties();
-                String version = properties.getProperty("java.specification.version", "0");
-                if (version.startsWith("1.") || Integer.parseInt(version) < 21) {
+                if (!MinecraftProcesses.isMinecraftLaunch(properties.getProperty("sun.java.command", ""), pid)) {
+                    throw new IllegalArgumentException("The selected PID is not a recognized Minecraft Java client.");
+                }
+                String version = properties.getProperty("java.specification.version", "");
+                if (!version.matches("[0-9]{2,4}") || Integer.parseInt(version) < 21) {
                     throw new IllegalArgumentException("The Minecraft process must be running on Java 21 or newer.");
                 }
                 target.loadAgent(jar.toString(), slot.strip() + "\n" + response);
@@ -52,7 +57,7 @@ final class AttachLauncher {
             }
             String result = Files.readString(response);
             if (result.isBlank()) {
-                throw new IOException("Minecraft returned no copy result. Check your inventory before retrying.");
+                return "Minecraft returned no copy result. Check Minecraft chat and your inventory before retrying.";
             }
             return result;
         } finally {
@@ -101,9 +106,9 @@ final class AttachLauncher {
                 refresh.setEnabled(false);
                 inject.setEnabled(false);
                 status.setText("Looking for running Minecraft clients…");
-                new SwingWorker<List<Target>, Void>() {
+                new SwingWorker<MinecraftProcesses.Discovery, Void>() {
                     @Override
-                    protected List<Target> doInBackground() {
+                    protected MinecraftProcesses.Discovery doInBackground() {
                         return MinecraftProcesses.find();
                     }
 
@@ -112,12 +117,14 @@ final class AttachLauncher {
                         try {
                             var found = get();
                             clients.removeAllItems();
-                            found.forEach(clients::addItem);
-                            status.setText(found.isEmpty()
-                                    ? "Start Minecraft and refresh, or enter its PID from Task Manager."
+                            found.targets().forEach(clients::addItem);
+                            status.setText(found.incomplete() ? MinecraftProcesses.DISCOVERY_INCOMPLETE
+                                    : found.targets().isEmpty()
+                                    ? "No Minecraft client found. Refresh or enter its PID from Task Manager."
                                     : "Ready to attach.");
                         } catch (ExecutionException error) {
-                            status.setText(errorMessage(error.getCause()));
+                            clients.removeAllItems();
+                            status.setText(MinecraftProcesses.DISCOVERY_INCOMPLETE);
                         } catch (InterruptedException error) {
                             Thread.currentThread().interrupt();
                             status.setText("Process scan interrupted.");
@@ -161,7 +168,7 @@ final class AttachLauncher {
                         try {
                             status.setText(get());
                         } catch (ExecutionException error) {
-                            status.setText(errorMessage(error.getCause()));
+                            status.setText(attachError(error.getCause()));
                         } catch (InterruptedException error) {
                             Thread.currentThread().interrupt();
                             status.setText("Attach interrupted.");
@@ -184,17 +191,24 @@ final class AttachLauncher {
         });
     }
 
-    static String errorMessage(Throwable error) {
-        if (error instanceof NoClassDefFoundError) {
-            return "Run Hopliter with a JDK 21 or newer that includes jdk.attach.";
+    static String attachError(Throwable error) {
+        if (error instanceof IllegalArgumentException && error.getClass() == IllegalArgumentException.class) {
+            return error.getMessage();
+        }
+        if (error instanceof LinkageError) {
+            return "Attach failed. Run Hopliter with a JDK 21 or newer that includes jdk.attach.";
         }
         if (error instanceof AgentInitializationException) {
-            return "Start a supported Minecraft world and try again. Check the game log for details.";
+            return "Agent initialization failed. Check the Minecraft log and inventory before retrying.";
+        }
+        if (error instanceof AgentLoadException) {
+            return "Agent load failed. If the game JVM disables dynamic agents, add "
+                    + "-XX:+EnableDynamicAgentLoading to its JVM arguments and restart Minecraft.";
         }
         if (error instanceof AttachNotSupportedException) {
-            return "Could not attach. Use the same OS account and elevation level as Minecraft.";
+            return "Attach failed. Check that Minecraft is still open and runs under the same OS account "
+                    + "and elevation level as Hopliter.";
         }
-        String message = error.getMessage();
-        return message == null ? error.getClass().getSimpleName() : message;
+        return "Attach failed. Check that Minecraft is still open, then check the game log and inventory before retrying.";
     }
 }

@@ -16,8 +16,9 @@ stack's count and item components, including a UID stored in the item data.
 Use `/hoplitercopy auto` for the first empty hotbar or main-inventory slot.
 A destination index from 1 to 35 selects a specific empty slot. The index is
 zero-based, so 1 selects the visible hotbar slot 2. Minecraft chat reports
-whether the server completed the copy. The command uses the player's existing
-Minecraft session.
+whether the server completed the copy. The launcher reports when it sends the
+command through the player's existing Minecraft session. Look for the server's
+confirmation in Minecraft chat.
 
 | Minecraft and Paper | Java for the game and server |
 | --- | --- |
@@ -27,8 +28,12 @@ Minecraft session.
 ## Launcher
 
 Open `Hopliter-Multiplayer.jar` with JDK 21 or newer, under the same OS account
-as Minecraft. The launcher also supports integrated single-player and hosted
-LAN worlds. Select Minecraft and click **Copy Slot 1**.
+and elevation level as Minecraft. On Windows, **Refresh** combines Java's JVM
+list with a scan of visible top-level Minecraft windows. If the game is absent
+from the list, get its `javaw.exe` or `java.exe` PID from the **Details** tab in
+Task Manager and enter it in **Minecraft PID**. Select the game or enter its PID,
+then click **Copy Slot 1**. The launcher validates the client before copying or
+sending a command. It also supports integrated single-player and hosted LAN worlds.
 
 ```sh
 java -jar Hopliter-Multiplayer.jar --list

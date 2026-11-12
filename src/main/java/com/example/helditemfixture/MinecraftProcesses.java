@@ -1,28 +1,16 @@
 package com.example.helditemfixture;
 
 import com.sun.tools.attach.VirtualMachine;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 final class MinecraftProcesses {
     private static final Pattern PID = Pattern.compile("[1-9][0-9]{0,9}");
-    private static final String WINDOWS_GAME_PIDS = """
-            $session = (Get-Process -Id $PID).SessionId
-            Get-Process -Name java,javaw -ErrorAction SilentlyContinue |
-                Where-Object {
-                    $_.SessionId -eq $session -and
-                    $_.MainWindowTitle -match '^Minecraft(?:[ *]|$)' -and
-                    $_.MainWindowTitle -notmatch '^Minecraft Launcher(?:\\s|$)'
-                } |
-                ForEach-Object { [Console]::WriteLine($_.Id) }
-            """;
+    private static final Pattern MAIN_CLASS_SEPARATOR = Pattern.compile("\\s+");
+    static final String DISCOVERY_INCOMPLETE = "Process discovery was incomplete. You can enter Minecraft's PID manually.";
 
     private MinecraftProcesses() {}
 
@@ -33,25 +21,58 @@ final class MinecraftProcesses {
         }
     }
 
+    record Discovery(List<Target> targets, boolean incomplete) {}
+
     static boolean isPid(String value) {
-        return PID.matcher(value).matches();
+        return PID.matcher(value).matches() && Long.parseLong(value) <= Integer.MAX_VALUE;
     }
 
-    static List<Target> find() {
+    static Discovery find() {
         Map<String, Target> targets = new LinkedHashMap<>();
-        for (var vm : VirtualMachine.list()) {
-            String mainClass = vm.displayName().stripLeading().split("\\s+", 2)[0];
-            String label = clientName(mainClass);
-            if (label != null && isPid(vm.id())) {
-                targets.put(vm.id(), new Target(vm.id(), label));
+        boolean incomplete = false;
+        try {
+            for (var vm : VirtualMachine.list()) {
+                String label = clientNameForLaunch(vm.displayName());
+                if (label != null && isPid(vm.id())) {
+                    targets.put(vm.id(), new Target(vm.id(), label));
+                }
             }
+        } catch (LinkageError | RuntimeException error) {
+            incomplete = true;
         }
-        if (System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows")) {
-            addWindowsTargets(targets);
-        } else {
-            addCommandLineTargets(targets);
+        try {
+            if (isWindows()) {
+                for (String pid : WindowsGameWindows.findPids()) {
+                    if (isPid(pid)) {
+                        targets.putIfAbsent(pid, new Target(pid, "Minecraft (game window)"));
+                    }
+                }
+            } else {
+                addCommandLineTargets(targets);
+            }
+        } catch (LinkageError | RuntimeException error) {
+            incomplete = true;
         }
-        return List.copyOf(targets.values());
+        return new Discovery(List.copyOf(targets.values()), incomplete);
+    }
+
+    static boolean isMinecraftLaunch(String launch, String pid) {
+        if (clientNameForLaunch(launch) != null) {
+            return true;
+        }
+        try {
+            return isWindows() && WindowsGameWindows.findPids().contains(pid);
+        } catch (LinkageError | RuntimeException error) {
+            return false;
+        }
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows");
+    }
+
+    private static String clientNameForLaunch(String launch) {
+        return clientName(MAIN_CLASS_SEPARATOR.split(launch.stripLeading(), 2)[0]);
     }
 
     private static String clientName(String mainClass) {
@@ -89,38 +110,4 @@ final class MinecraftProcesses {
         }
     }
 
-    private static void addWindowsTargets(Map<String, Target> targets) {
-        String systemRoot = System.getenv("SystemRoot");
-        if (systemRoot == null) {
-            return;
-        }
-        Path powershell = Path.of(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-        if (!Files.isRegularFile(powershell)) {
-            return;
-        }
-        Process scan = null;
-        try {
-            scan = new ProcessBuilder(powershell.toString(), "-NoLogo", "-NoProfile", "-NonInteractive",
-                    "-Command", WINDOWS_GAME_PIDS).redirectError(ProcessBuilder.Redirect.DISCARD).start();
-            if (scan.waitFor(4, TimeUnit.SECONDS) && scan.exitValue() == 0) {
-                try (var output = scan.inputReader()) {
-                    String line;
-                    while ((line = output.readLine()) != null) {
-                        String pid = line.strip();
-                        if (isPid(pid)) {
-                            targets.putIfAbsent(pid, new Target(pid, "Minecraft (game window)"));
-                        }
-                    }
-                }
-            }
-        } catch (IOException ignored) {
-            // The JVM list and manual PID remain available if PowerShell is restricted.
-        } catch (InterruptedException error) {
-            Thread.currentThread().interrupt();
-        } finally {
-            if (scan != null && scan.isAlive()) {
-                scan.destroyForcibly();
-            }
-        }
-    }
 }
