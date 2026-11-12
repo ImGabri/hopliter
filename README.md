@@ -1,91 +1,60 @@
-# hopliter — Hoplite.gg item clone fixture
+# Hopliter Multiplayer
 
-Item clone fixture for Minecraft 1.21.11 staging tests on **hoplite.gg**.
+Hopliter copies the full stack in **hotbar slot 1** into an empty inventory
+slot. The default destination is **hotbar slot 2**. The copy includes the
+stack's count and item components, including a UID stored in the item data.
 
-This Java 21 executable clones one item from a source inventory slot into a
-destination inventory slot on an authenticated staging RCON backend, so both
-slots end up filled with the same item (same id, components, and UID). By
-default it clones hotbar slot `1` into hotbar slot `2`. It preserves the source
-stack and does not consume or move it.
+## Paper multiplayer
 
-## Target environment (from hoplite.gg)
+1. Put `Hopliter-Multiplayer-paper.jar` in the Paper server's `plugins/` folder
+   and restart the server. If you use Velocity, install the JAR on the Paper
+   backend that hosts the world. Keep one copy of the Hopliter plugin there.
+2. Use an operator account or have the server administrator grant your player
+   `hopliter.copy`. Paper checks this permission before copying.
+3. Put the stack in hotbar slot 1 and leave slot 2 empty. In Minecraft, run
+   `/hoplitercopy`. The Paper plugin works with the standard Minecraft client.
 
-The screenshots from hoplite.gg show:
+Use `/hoplitercopy auto` for the first empty hotbar or main-inventory slot.
+A destination index from 1 to 35 selects a specific empty slot. The index is
+zero-based, so 1 selects the visible hotbar slot 2. Minecraft chat reports
+whether the server completed the copy. The launcher reports when it sends the
+command through the player's existing Minecraft session. Look for the server's
+confirmation in Minecraft chat.
 
-| Detail | Value |
-|---|---|
-| Minecraft version | 1.21.11 (hoplite-modpack.fabric) |
-| Server software | UniverseSpigot (Velocity) |
-| Velocity version | 1.7.2-26.3 |
-| Java version | 21.0.7 |
-| Detected plugins | botapi, cultac-companion, fastasyncworldedit, floodgate, geysermodelengine, hoplitecosmetics, hoplitenucleus, luckperms, minecraft, modelengine, survival-zombies, velocity, voicechat |
+| Minecraft and Paper | Java for the game and server |
+| --- | --- |
+| 1.21.11 | 21 |
+| 26.3 | 25 |
 
-This tool targets the **UniverseSpigot backend**, not the Velocity proxy itself.
-Velocity proxies player connections but RCON inventory commands must be sent to
-the backend's RCON port (default `25575`) reachable at `localhost` or through an
-SSH tunnel.
+## Launcher
 
-## What it does
+Open `Hopliter-Multiplayer.jar` with JDK 21 or newer, under the same OS account
+and elevation level as Minecraft. On Windows, **Refresh** combines Java's JVM
+list with a scan of visible top-level Minecraft windows. If the game is absent
+from the list, get its `javaw.exe` or `java.exe` PID from the **Details** tab in
+Task Manager and enter it in **Minecraft PID**. Select the game or enter its PID,
+then click **Copy Slot 1**. The launcher validates the client before copying or
+sending a command. It also supports integrated single-player and hosted LAN worlds.
 
-1. Reads the item in the source slot via `/data get`.
-2. Confirms the destination slot is empty (`unless items ...`).
-3. Places a copy of the source item (count 1) into the destination slot via
-   `item replace entity @s inventory.<dest> with <id>{components:<snbt>} 1`.
-4. Reports whether both slots are now filled.
-
-The clone carries the source item's full component data, including any UID
-stored under `components` (relevant for plugins such as `hoplitecosmetics` and
-`hoplitenucleus` that may tag items with custom data), so the two slots contain
-matching items.
-
-## Run on staging
-
-1. Use an existing RCON endpoint on your UniverseSpigot staging backend, reached
-   at localhost or through an SSH tunnel. The default local port is 25575.
-2. Log in with the test player and place an item in the source hotbar slot
-   (default `1`). Keep the destination slot (default `2`) empty.
-3. Open `HeldItemUidFixture.jar` from any folder with Java 21. Enter the host,
-   port, player username, source/dest slot ids, and RCON password, then click
-   **Clone Hotbar 1 → 2**.
-4. Confirm both slots are filled in-game.
-
-For a terminal run:
-
-```text
-java -jar HeldItemUidFixture.jar --host 127.0.0.1 --port 25575 --player TestPlayer
+```sh
+java -jar Hopliter-Multiplayer.jar --list
+java -jar Hopliter-Multiplayer.jar --attach <pid>
+java -jar Hopliter-Multiplayer.jar --attach <pid> auto
 ```
 
-Override the slots with `--slot` and `--dest-slot`:
-
-```text
-java -jar HeldItemUidFixture.jar --player TestPlayer --slot 1 --dest-slot 2
-```
-
-## Result meanings
-
-| Result | Meaning |
-|---|---|
-| `CLONED` | The source item was copied into the destination slot; both slots are filled. |
-| `ERROR` | The clone did not complete. The message explains why (empty source, occupied destination, offline player, authentication failure, truncated item data, or a rejected command). |
-
-Exit codes: `0` = cloned, `1` = error, `2` = invalid arguments.
-
-## Failsafes and limits
-
-- **Localhost only** — the tool refuses to connect to non-loopback hosts. Use an SSH tunnel for remote staging.
-- **Empty source** — aborts with a clear message instead of sending a write.
-- **Occupied destination** — aborts before writing; never overwrites an existing slot.
-- **Offline player** — `/data get` reports the player missing; the tool aborts with no write sent.
-- **Bad authentication** — the RCON password is verified before any inventory command is sent.
-- **Truncated item data** — if `/data get` folds the source item's SNBT (truncates long replies with `...`), the tool aborts rather than building a malformed command.
-- **Unreadable item** — if the source slot's item id can't be parsed, the tool aborts instead of sending an invalid command.
-- **Invalid slots** — source and destination must be integers `0`–`26` and must differ.
-
-This is a staging/test utility. Run it against a disposable staging server as a positive control; it does not interact with any anti-dupe system.
+On a JVM that requires explicit opt-in, add `-XX:+EnableDynamicAgentLoading` to
+Minecraft's JVM arguments and restart the game. The in-game server command is
+also available directly from chat. Restart Minecraft when switching between
+Hopliter injector builds.
 
 ## Build and verify
 
-Build with a JDK 21 and Maven using `mvn clean package`. The Maven build creates
-`target/helditem-uid-fixture-1.1.0.jar`. The ready-to-run JAR in this package was
-compiled with OpenJDK 21. Run `python3 tests/test_fixture.py` on Linux or macOS
-to test the packaged JAR against the scripted RCON endpoint.
+Use JDK 21 and Maven.
+
+```sh
+mvn clean package
+python3 tests/test_fixture.py -v
+```
+
+The build writes `target/Hopliter-Multiplayer-paper.jar` for the Paper server
+and `target/Hopliter-Multiplayer.jar` for the desktop launcher.

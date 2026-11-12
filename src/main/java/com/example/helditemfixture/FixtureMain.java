@@ -1,73 +1,56 @@
 package com.example.helditemfixture;
 
 import java.awt.GraphicsEnvironment;
-import java.io.Console;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
 
 public final class FixtureMain {
-    private static final Set<String> OPTIONS = Set.of(
-            "--host", "--port", "--player", "--slot", "--dest-slot");
-
     private FixtureMain() {}
 
     public static void main(String[] args) {
         if (args.length == 0 && !GraphicsEnvironment.isHeadless()) {
-            FixtureGui.show();
+            AttachLauncher.show();
             return;
         }
         if (args.length == 0 || (args.length == 1 && args[0].equals("--help"))) {
             System.out.println("""
-                    HeldItemUidFixture
-                    java -jar HeldItemUidFixture.jar --player TestPlayer
-                      [--host 127.0.0.1] [--port 25575] [--slot 1] [--dest-slot 2]
+                    Hopliter slot-copy fixture for Minecraft Java 1.21.11 / 26.3
+                    java -jar Hopliter-Multiplayer.jar                 Open the attach launcher
+                    java -jar Hopliter-Multiplayer.jar --list          List Minecraft clients
+                    java -jar Hopliter-Multiplayer.jar --attach <pid> [auto|1-35]
 
-                    Connects to an existing staging RCON endpoint on localhost or an SSH tunnel.
-                    Clones the item in the source hotbar slot into the destination hotbar slot
-                    so both slots are filled (defaults clone hotbar 1 → 2).
+                    Copies the full item stack in HOTBAR SLOT 1 to HOTBAR SLOT 2 by default.
+                    Destination index 1 means hotbar slot 2. Use auto for the first empty slot.
+                    Multiplayer requires this JAR on Paper and the hopliter.copy permission.
                     """);
             return;
         }
         try {
-            System.exit(run(args));
+            if (args.length == 1 && args[0].equals("--list")) {
+                var discovery = MinecraftProcesses.find();
+                discovery.targets().forEach(System.out::println);
+                if (discovery.incomplete()) {
+                    System.err.println(MinecraftProcesses.DISCOVERY_INCOMPLETE);
+                    if (discovery.targets().isEmpty()) {
+                        System.exit(1);
+                    }
+                } else if (discovery.targets().isEmpty()) {
+                    System.out.println("No Minecraft Java client detected. You can pass its PID to --attach.");
+                }
+            } else if ((args.length == 2 || args.length == 3) && args[0].equals("--attach")) {
+                String result = AttachLauncher.attachAndCopy(args[1], args.length == 3 ? args[2]
+                        : Integer.toString(CopySlots.DEFAULT_DESTINATION));
+                System.out.println(result);
+                if (!result.startsWith("Copied full stack ") && !result.startsWith(FixtureRunner.COMMAND_SENT)) {
+                    System.exit(1);
+                }
+            } else {
+                throw new IllegalArgumentException("Use --help, --list, or --attach <pid> [auto|1-35].");
+            }
         } catch (IllegalArgumentException error) {
             System.err.println(error.getMessage());
             System.exit(2);
-        } catch (IOException error) {
-            System.err.println("Error: " + error.getMessage());
+        } catch (LinkageError | Exception error) {
+            System.err.println(AttachLauncher.attachError(error));
             System.exit(1);
-        }
-    }
-
-    private static int run(String[] args) throws IOException {
-        Map<String, String> options = new HashMap<>();
-        for (int i = 0; i < args.length; i += 2) {
-            if (i + 1 >= args.length || !OPTIONS.contains(args[i])
-                    || args[i + 1].startsWith("--") || options.putIfAbsent(args[i], args[i + 1]) != null) {
-                throw new IllegalArgumentException("Invalid or duplicate option. Run with --help.");
-            }
-        }
-        FixtureRunner.Settings settings = FixtureRunner.Settings.parse(
-                options.getOrDefault("--host", "127.0.0.1"), options.getOrDefault("--port", "25575"),
-                options.get("--player"), options.getOrDefault("--slot", "1"), options.getOrDefault("--dest-slot", "2"));
-        Console console = System.console();
-        if (console == null) {
-            throw new IllegalArgumentException("Open the JAR dialog or run from an interactive terminal.");
-        }
-        char[] password = console.readPassword("Staging RCON password: ");
-        if (password == null || password.length == 0) {
-            throw new IllegalArgumentException("An RCON password is required.");
-        }
-        try {
-            FixtureRunner.Result result = FixtureRunner.run(settings, password);
-            console.writer().println(result.report());
-            console.writer().flush();
-            return result.status().exitCode;
-        } finally {
-            Arrays.fill(password, '\0');
         }
     }
 }

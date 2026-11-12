@@ -1,177 +1,185 @@
 package com.example.helditemfixture;
 
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 final class FixtureRunner {
-    static final int MAIN_SLOTS = 27;
-    private static final String QUERY_PREFIX = " has the following entity data: ";
-    private static final String CLONE_COMMAND =
-            "execute as %s if items entity @s inventory.%d * unless items entity @s inventory.%d * "
-            + "run item replace entity @s inventory.%d with %s{components:%s} 1";
-    private static final Pattern USERNAME = Pattern.compile("[A-Za-z0-9_]{3,16}");
+    static final String COMMAND_SENT = "Sent /" + CopySlots.COMMAND;
+    private static final Pattern GAME_VERSION = Pattern.compile("\\\"id\\\"\\s*:\\s*\\\"(?:1\\.21\\.11|26\\.3)\\\"");
 
-    record Settings(InetAddress host, int port, String player, int sourceSlot, int destSlot) {
-        static Settings parse(String host, String portText, String player, String sourceText, String destText) {
-            String literal = switch (host) {
-                case "localhost", "127.0.0.1" -> "127.0.0.1";
-                case "::1" -> "::1";
-                default -> throw new IllegalArgumentException(
-                        "Use localhost, 127.0.0.1, or ::1 for your staging RCON endpoint or SSH tunnel.");
-            };
-            InetAddress address = new InetSocketAddress(literal, 0).getAddress();
-            int port;
-            try {
-                port = Integer.parseInt(portText);
-            } catch (NumberFormatException error) {
-                throw new IllegalArgumentException("Enter a port from 1 to 65535.");
+    private final Object client;
+    private final Method integratedServer;
+    private final Field localPlayer;
+    private final Method playerUuid;
+    private final Method playerList;
+    private final Method findPlayer;
+    private final Method playerInventory;
+    private final Method freeSlot;
+    private final Method getItem;
+    private final Method setItem;
+    private final Method setChanged;
+    private final Method isEmpty;
+    private final Method copyStack;
+    private final MultiplayerCommands multiplayer;
+
+    static FixtureRunner bind(Class<?>[] loadedClasses) throws ReflectiveOperationException, IOException {
+        for (Class<?> candidate : loadedClasses) {
+            String name = candidate.getName();
+            if (name.equals("gfj") || name.equals("net.minecraft.class_310")
+                    || name.equals("net.minecraft.client.Minecraft")) {
+                try (var version = candidate.getResourceAsStream("/version.json")) {
+                    if (version != null && GAME_VERSION.matcher(
+                            new String(version.readNBytes(8192), StandardCharsets.UTF_8)).find()) {
+                        return new FixtureRunner(candidate, name.equals("net.minecraft.class_310"),
+                                name.equals("net.minecraft.client.Minecraft"));
+                    }
+                }
             }
-            if (port < 1 || port > 65_535) {
-                throw new IllegalArgumentException("Enter a port from 1 to 65535.");
-            }
-            if (player == null || !USERNAME.matcher(player).matches()) {
-                throw new IllegalArgumentException("Enter the test player's Java username (3–16 letters, digits, or underscores).");
-            }
-            int sourceSlot;
-            try {
-                sourceSlot = Integer.parseInt(sourceText);
-            } catch (NumberFormatException error) {
-                throw new IllegalArgumentException("Enter the source slot id from 0 to 26.");
-            }
-            if (sourceSlot < 0 || sourceSlot > 26) {
-                throw new IllegalArgumentException("Enter the source slot id from 0 to 26.");
-            }
-            int destSlot;
-            try {
-                destSlot = Integer.parseInt(destText);
-            } catch (NumberFormatException error) {
-                throw new IllegalArgumentException("Enter the destination slot id from 0 to 26.");
-            }
-            if (destSlot < 0 || destSlot > 26 || destSlot == sourceSlot) {
-                throw new IllegalArgumentException("Enter a different destination slot id from 0 to 26.");
-            }
-            return new Settings(address, port, player, sourceSlot, destSlot);
         }
+        throw new IllegalStateException("Start Minecraft Java 1.21.11 or 26.3 before attaching.");
     }
 
-    enum Status {
-        CLONED(0), ERROR(1);
-
-        final int exitCode;
-
-        Status(int exitCode) {
-            this.exitCode = exitCode;
+    private FixtureRunner(Class<?> clientType, boolean fabric, boolean modern) throws ReflectiveOperationException {
+        // 26.3 uses official unobfuscated member names. 1.21.11 may use obfuscated
+        // Vanilla names or intermediary Fabric names.
+        client = clientType.getMethod(modern ? "getInstance" : fabric ? "method_1551" : "V").invoke(null);
+        if (client == null) {
+            throw new IllegalStateException("Wait for Minecraft to finish starting before attaching.");
         }
+        integratedServer = clientType.getMethod(modern ? "getSingleplayerServer" : fabric ? "method_1576" : "aa");
+        localPlayer = clientType.getField(modern ? "player" : fabric ? "field_1724" : "s");
+        playerUuid = localPlayer.getType().getMethod(modern ? "getUUID" : fabric ? "method_5667" : "cY");
+        playerList = integratedServer.getReturnType().getMethod(modern ? "getPlayerList" : fabric ? "method_3760" : "aj");
+        findPlayer = playerList.getReturnType().getMethod(modern ? "getPlayer" : fabric ? "method_14602" : "b", UUID.class);
+        playerInventory = findPlayer.getReturnType().getMethod(modern ? "getInventory" : fabric ? "method_31548" : "gK");
+        Class<?> inventory = playerInventory.getReturnType();
+        freeSlot = inventory.getMethod(modern ? "getFreeSlot" : fabric ? "method_7376" : "k");
+        getItem = inventory.getMethod(modern ? "getItem" : fabric ? "method_5438" : "a", int.class);
+        Class<?> stack = getItem.getReturnType();
+        setItem = inventory.getMethod(modern ? "setItem" : fabric ? "method_5447" : "a", int.class, stack);
+        setChanged = inventory.getMethod(modern ? "setChanged" : fabric ? "method_5431" : "e");
+        isEmpty = stack.getMethod(modern ? "isEmpty" : fabric ? "method_7960" : "f");
+        copyStack = stack.getMethod(modern ? "copy" : fabric ? "method_7972" : "v");
+        multiplayer = MultiplayerCommands.bind(clientType, fabric, modern);
     }
 
-    record Result(Status status, String message) {
-        String report() {
-            return status + "\n" + message;
+    CompletableFuture<String> copySlotOne(int destination) {
+        if (destination == CopySlots.SOURCE) {
+            return CompletableFuture.completedFuture("Choose a different destination from hotbar slot 1.");
         }
+        CompletableFuture<String> result = new CompletableFuture<>();
+        CompletableFuture.delayedExecutor(15, TimeUnit.SECONDS).execute(() -> {
+            synchronized (result) {
+                result.complete("Minecraft did not respond. Return to the game and try again.");
+            }
+        });
+        try {
+            ((Executor) client).execute(() -> dispatchCopy(destination, result));
+        } catch (RuntimeException error) {
+            reportError(result, error);
+        }
+        return result;
     }
 
-    static Result run(Settings settings, char[] password) throws IOException {
-        try (RconClient rcon = new RconClient(settings.host(), settings.port(), password)) {
-            Item source = readItem(rcon, settings.player(), settings.sourceSlot);
-            if (source == null) {
-                return new Result(Status.ERROR, "The source slot inventory." + settings.sourceSlot + " is empty.");
-            }
-            if (source.id() == null || source.id().isBlank() || source.id().equals("unknown")) {
-                return new Result(Status.ERROR,
-                        "The source slot inventory." + settings.sourceSlot
-                                + " does not contain a readable item.");
-            }
-            Item dest = readItem(rcon, settings.player(), settings.destSlot);
-            if (dest != null) {
-                return new Result(Status.ERROR, "The destination slot inventory." + settings.destSlot + " is occupied.");
-            }
-            String id = source.id();
-            String componentsSnb = source.componentsSnb();
-            String command = CLONE_COMMAND.formatted(
-                    settings.player(), settings.sourceSlot, settings.destSlot,
-                    settings.destSlot, id, componentsSnb);
-            String reply = rcon.command(command);
-            if (reply != null && reply.startsWith("Replaced")) {
-                return new Result(Status.CLONED,
-                        "Cloned item from inventory." + settings.sourceSlot + " into inventory." + settings.destSlot
-                                + ". Both slots are now filled.");
-            }
-            return new Result(Status.ERROR, "The server did not accept the clone command: " + reply);
-        }
-    }
-
-    private static Item readItem(RconClient rcon, String player, int slot) throws IOException {
-        String output = rcon.command("data get entity " + player + " Inventory[{Slot:" + slot + "b}]").strip();
-        if (output.equals("No entity was found") || output.equals("No player was found")) {
-            throw new IOException("The test player is offline.");
-        }
-        if (output.equals("Found no elements matching Inventory[{Slot:" + slot + "b}]")
-                || output.equals("Can't get Inventory[{Slot:" + slot + "b}]; tag doesn't exist")) {
-            return null;
-        }
-        int prefix = output.indexOf(QUERY_PREFIX);
-        if (prefix < 0) {
-            throw new IOException("The backend did not return item data for inventory." + slot + ".");
-        }
-        String payload = output.substring(prefix + QUERY_PREFIX.length());
-        if (Snbt.isFolded(payload)) {
-            throw new IOException("The backend truncated the item data for inventory." + slot
-                    + ". The item's data is too large for /data get to return fully.");
+    private void dispatchCopy(int destination, CompletableFuture<String> result) {
+        if (result.isDone()) {
+            return;
         }
         try {
-            if (!(Snbt.read(payload) instanceof Snbt.Compound compound)) {
-                throw new IOException("Expected an item compound for inventory." + slot + ".");
+            Object server = integratedServer.invoke(client);
+            Object player = localPlayer.get(client);
+            if (player == null) {
+                result.complete("Join a world or Paper server before copying.");
+                return;
             }
-            Map<String, Snbt.Tag> data = new LinkedHashMap<>(compound.values());
-            Snbt.Tag countTag = data.get("count");
-            int count = countTag == null ? 1 : number(countTag);
-            if (count <= 0) {
-                return null;
+            if (server == null) {
+                synchronized (result) {
+                    if (!result.isDone()) {
+                        result.complete(multiplayer.requestCopy(client, destination));
+                    }
+                }
+                return;
             }
-            Snbt.Tag idTag = data.get("id");
-            String id = idTag instanceof Snbt.Atom ? ((Snbt.Atom) idTag).value() : null;
-            if (id == null || id.isBlank()) {
-                return new Item(0, "unknown", Map.of());
-            }
-            Snbt.Tag componentsTag = data.get("components");
-            Map<String, Snbt.Tag> components = new LinkedHashMap<>();
-            if (componentsTag instanceof Snbt.Compound c) {
-                components.putAll(c.values());
-            }
-            return new Item(count, id, components);
-        } catch (IllegalArgumentException error) {
-            throw new IOException("Could not read the backend's SNBT for inventory." + slot + ": " + error.getMessage(), error);
+            UUID owner = (UUID) playerUuid.invoke(player);
+            ((Executor) server).execute(() -> {
+                synchronized (result) {
+                    if (!result.isDone()) {
+                        try {
+                            result.complete(copyOnServer(server, owner, destination));
+                        } catch (ReflectiveOperationException | RuntimeException error) {
+                            reportError(result, error);
+                        }
+                    }
+                }
+            });
+        } catch (ReflectiveOperationException | RuntimeException error) {
+            reportError(result, error);
         }
     }
 
-    private static int number(Snbt.Tag tag) {
-        if (tag instanceof Snbt.Atom atom) {
-            switch (atom.type()) {
-                case BYTE, SHORT, INT, LONG -> {
-                    return Integer.parseInt(atom.value());
-                }
-                default -> {
-                }
-            }
+    private String copyOnServer(Object server, UUID owner, int destination) throws ReflectiveOperationException {
+        Object player = findPlayer.invoke(playerList.invoke(server), owner);
+        if (player == null) {
+            return "The local player left the world. Rejoin before copying.";
         }
-        throw new IllegalArgumentException("Expected a byte, short, int, or long tag");
+        Object inventory = playerInventory.invoke(player);
+        Object original = getItem.invoke(inventory, CopySlots.SOURCE);
+        if ((boolean) isEmpty.invoke(original)) {
+            return "Hotbar slot 1 is empty. Put the item in the first hotbar slot.";
+        }
+        int slot = destination == CopySlots.AUTO ? (int) freeSlot.invoke(inventory) : destination;
+        if (slot < 0 || slot >= CopySlots.INVENTORY_SIZE) {
+            return "No empty slot is available in the 36-slot main inventory.";
+        }
+        if (!(boolean) isEmpty.invoke(getItem.invoke(inventory, slot))) {
+            return "Destination slot " + (slot + 1) + " is occupied. Choose an empty slot.";
+        }
+        // A deep ItemStack copy preserves count, custom components and UID values.
+        // The server executes this mutation on its own main thread.
+        setItem.invoke(inventory, slot, copyStack.invoke(original));
+        setChanged.invoke(inventory);
+        return "Copied full stack from hotbar slot 1 into inventory slot " + (slot + 1)
+                + " with its original item data.";
     }
 
-    private record Item(int count, String id, Map<String, Snbt.Tag> components) {
-        public String id() {
-            return id;
+    private record MultiplayerCommands(Method connection, Method commands, Method root, Method child,
+                                       Method sendCommand) {
+        static MultiplayerCommands bind(Class<?> clientType, boolean fabric, boolean modern)
+                throws ReflectiveOperationException {
+            Method connection = clientType.getMethod(modern ? "getConnection" : fabric ? "method_1562" : "R");
+            Class<?> listener = connection.getReturnType();
+            Method commands = listener.getMethod(modern ? "getCommands" : fabric ? "method_2886" : "t");
+            Method root = commands.getReturnType().getMethod("getRoot");
+            Method child = root.getReturnType().getMethod("getChild", String.class);
+            Method send = listener.getMethod(modern ? "sendCommand" : fabric ? "method_45730" : "d", String.class);
+            return new MultiplayerCommands(connection, commands, root, child, send);
         }
 
-        public Map<String, Snbt.Tag> components() {
-            return components;
+        String requestCopy(Object client, int destination) throws ReflectiveOperationException {
+            Object listener = connection.invoke(client);
+            if (listener == null) {
+                return "Join a Paper server before copying.";
+            }
+            Object availableCommands = root.invoke(commands.invoke(listener));
+            if (child.invoke(availableCommands, CopySlots.COMMAND) == null) {
+                return "Multiplayer requires Hopliter on the server and the hopliter.copy permission.";
+            }
+            String slot = destination == CopySlots.AUTO ? "auto" : Integer.toString(destination);
+            sendCommand.invoke(listener, CopySlots.COMMAND + " " + slot);
+            return COMMAND_SENT + " " + slot + ". Check Minecraft chat for server confirmation.";
         }
+    }
 
-        String componentsSnb() {
-            return Snbt.write(new Snbt.Compound(components));
-        }
+    private static void reportError(CompletableFuture<String> result, Exception error) {
+        Throwable cause = error.getCause();
+        System.err.println("Hopliter copy failed: " + (cause == null ? error : cause).getClass().getSimpleName());
+        result.complete("Minecraft could not complete the copy. Check the game log and inventory.");
     }
 }
